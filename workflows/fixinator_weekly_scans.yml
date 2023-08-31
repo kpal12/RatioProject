@@ -1,0 +1,36 @@
+name: fixinator-weekly-scan
+on:
+  schedule:
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+
+jobs: 
+  ######################### fixinator_code_scan #####################################
+  fixinator_code_scan: 
+    runs-on: WIN_RATIO_1
+    steps:
+
+              
+       - name: 'checkout repository on branch: source'
+         uses: actions/checkout@v3
+         with:
+             repository: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+             token: ${{ secrets.GIT_PAT}}
+             ref: ${{ github.REF}}
+             fetch-depth: 0 |
+
+       - name: setup git config
+         run: |
+              git --version
+              git init 
+              git config --global  --add safe.directory E:\projectarea\{{ github.event.repository.name }}/${{ github.event.repository.name }}
+              git config user.name "Github Actions Bot"
+              git config user.email "<>"
+              
+       - name: List Files in Workspace
+         run: |
+          dir
+      
+       - name: Run Fixinator Scan 
+         run: |
+              box fixinator path=. resultFormat=html resultFile=E:\fixinator\exchange\reports\fixinator-results.html

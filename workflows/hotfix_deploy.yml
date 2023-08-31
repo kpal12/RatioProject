@@ -1,0 +1,216 @@
+name: hotfix-deploy
+on: 
+  push:
+     branches: 
+        - hotfix/**
+  workflow_dispatch:
+env:
+  artifact_name: ''
+  version-major: 'hotfix'
+  version-minor: '0'
+  version-patch: '0'
+  appname: 'ratio-exchange'
+
+
+jobs: 
+  ######################### fixinator_code_scan #####################################
+  fixinator_code_scan: 
+    runs-on: WIN_RATIO_1
+    steps:
+
+              
+       - name: 'checkout repository on branch: source'
+         uses: actions/checkout@v3
+         with:
+             repository: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+             token: ${{ secrets.GIT_PAT}}
+             ref: ${{ github.REF}}
+             fetch-depth: 0 |
+
+       - name: setup git config
+         run: |
+              git --version
+              git init 
+              git config --global  --add safe.directory E:\projectarea\{{ github.event.repository.name }}/${{ github.event.repository.name }}
+              git config user.name "Github Actions Bot"
+              git config user.email "<>"
+              
+       - name: List Files in Workspace
+         run: |
+          dir
+      
+       - name: Run Fixinator Scan 
+         run: |
+              box fixinator gitLastCommit=true
+  checkout-Zip-Publish: 
+    runs-on: ubuntu-latest
+    container:
+      image: gradle
+      
+    steps:
+       - name: git download 
+         run: |
+          apt update
+          apt install -y git
+
+ 
+       - uses: actions/checkout@v3
+         with:
+             repository: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+             token: ${{ secrets.GIT_PAT}}
+             ref: ${{ github.REF}}
+             fetch-depth: 0 |
+             
+       - name: setup git config
+         run: |
+              pwd
+              git --version
+              git init 
+              git config --global  --add safe.directory /__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
+              git config user.name "Github Actions Bot"
+              git config user.email "<>"
+
+       - name: List Changed in files in last commit 
+         run: |
+          pwd 
+          for i in $(git diff HEAD^ HEAD --name-only)
+              do
+               echo $i
+              done
+       
+       - name: Create Temp Changed Files Folder 
+         run: |
+          for i in $(git show --format="" --name-only -- ':(exclude).github\*' | xargs dirname | sort | uniq)
+             do 
+               echo $i
+               mkdir -p ./Release/$i
+             done
+       - name: List Changed log Files in Release  Folder 
+         run: |
+          cd Release
+          touch DeployFiles.txt
+          cd ..
+          echo "$(git diff HEAD^ HEAD --name-only --diff-filter=ACMR ':(exclude).github/*')" > Release/DeployFiles.txt
+          cat Release/DeployFiles.txt
+          
+       - name: Create Temp Changed Files Folder 
+         run: |
+          for i in $(cat Release/DeployFiles.txt)
+             do 
+               echo $i
+               cp -r ./$i ./Release/$i
+             done
+
+       - name: Moves file to temp base dir  
+         run: |
+          rm -rf exchange
+          cd Release  
+          cp -r . ../.
+          cd ..               
+
+       - name: Publish Package to Github Registry 
+         run: |
+             gradle  publish
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
+ ################################### DEV Deploy ################################################
+  CF_DEV_Deploy: 
+    needs: [checkout-Zip-Publish]
+    runs-on: WIN_RATIO_1
+    environment: DEV 
+    
+    steps:
+    
+       - name: Print Package Version No
+         shell: sh
+         run: |
+            echo "Package Version: ${{ github.event.inputs.versionNumber }}"
+            
+       - name: Download artifact from Github Package Registry
+         shell: sh
+         run: |
+           curl -O -L https://_:${{ secrets.GIT_PAT }}@maven.pkg.github.com/${{ github.repository_owner }}/${{github.event.repository.name }}/com/ratio/exchange/ratio-exchange/${{ env.VERSION}}/ratio-exchange-${{ env.VERSION}}.zip    
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Unzip Package to temp folder 
+         shell: sh
+         run: |
+           7z x ratio-exchange-${{ env.VERSION}}.zip -oratio-exchange-${{ env.VERSION}} -aoa
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Copy Extracted Files to Target Server Location 
+         run: |
+           robocopy "ratio-exchange-${{ env.VERSION}}" "\\F00-ca-a40\c\home\cf-dev.ratio.exchange\wwwroot\exchange\" /e /XO /fp /ns /ndl /XD ".github"
+           if ($lastexitcode -lt 8) { exit 0 } else { exit 1 }
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+
+  CF_STAGE_Deploy:
+    needs: [ CF_DEV_Deploy ]
+    runs-on: WIN_RATIO_1
+     #if: ${{ github.event_name != 'push'}}
+    environment: STAGING
+    
+    steps:
+    
+       - name: Print Package Version No
+         shell: sh
+         run: |
+            echo "Package Version: ${{ github.event.inputs.versionNumber }}"
+            
+       - name: Download artifact from Github Package Registry
+         shell: sh
+         run: |
+           curl -O -L https://_:${{ secrets.GIT_PAT }}@maven.pkg.github.com/${{ github.repository_owner }}/${{github.event.repository.name }}/com/ratio/exchange/ratio-exchange/${{ env.VERSION}}/ratio-exchange-${{ env.VERSION}}.zip    
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Unzip Package to temp folder 
+         shell: sh
+         run: |
+           7z x ratio-exchange-${{ env.VERSION}}.zip -oratio-exchange-${{ env.VERSION}} -aoa 
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Copy Extracted Files to Target Server Location 
+         run: |
+           robocopy "ratio-exchange-${{ env.VERSION}}" "\\8f4-16-75e\c\home\cf1-staging.ratio.exchange\wwwroot\exchange\" /e /XO /fp /ns /ndl /XD ".github"
+           if ($lastexitcode -lt 8) { exit 0 } else { exit 1 }
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+  CF_Production_Deploy:
+    needs: [ CF_STAGE_Deploy ]
+    runs-on: WIN_RATIO_1
+     #if: ${{ github.event_name != 'push'}}
+    environment: PROD
+    
+    steps:
+    
+       - name: Print Package Version No
+         shell: sh
+         run: |
+            echo "Package Version: ${{ github.event.inputs.versionNumber }}"
+            
+       - name: Download artifact from Github Package Registry
+         shell: sh
+         run: |
+           curl -O -L https://_:${{ secrets.GIT_PAT }}@maven.pkg.github.com/${{ github.repository_owner }}/${{github.event.repository.name }}/com/ratio/exchange/ratio-exchange/${{ env.VERSION}}/ratio-exchange-${{ env.VERSION}}.zip    
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Unzip Package to temp folder 
+         shell: sh
+         run: |
+           7z x ratio-exchange-${{ env.VERSION}}.zip -oratio-exchange-${{ env.VERSION}} -aoa  
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}
+        
+       - name: Copy Extracted Files to Target Server Location 
+         run: |
+           robocopy "ratio-exchange-${{ env.VERSION}}" "\\E34-67-0fa\c\home\ratio.exchange\wwwroot\shared\" /e /XO /fp /ns /ndl /XD ".github"
+           if ($lastexitcode -lt 8) { exit 0 } else { exit 1 }
+         env: 
+           VERSION: ${{ env.version-major}}.${{ env.version-minor}}.${{ env.version-patch}}.${{ github.run_number}}

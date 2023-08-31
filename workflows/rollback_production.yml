@@ -1,0 +1,52 @@
+name: rollback-production
+
+on:
+  workflow_dispatch:
+    inputs: 
+      versionNumber: 
+        description: 'versionNumber eg 1.1.1.2'
+        default: ''
+
+env:
+  artifact_name: ''
+  appname: 'ratio-exchange'
+
+
+jobs: 
+
+
+ ################################### PROD Deploy ################################################
+  CF_PROD_Deploy: 
+    runs-on: WIN_RATIO_1
+     #if: ${{ github.event_name != 'push'}}
+    environment: DEV
+
+    
+    steps:
+    
+       - name: Print Package Version No
+         shell: sh
+         run: |
+            echo "Package Version: ${{ github.event.inputs.versionNumber }}"
+            
+       - name: Download artifact from Github Package Registry
+         shell: sh
+         run: |
+            curl -O -L https://_:${{ secrets.GIT_PAT }}@maven.pkg.github.com/${{ github.repository_owner }}/${{github.event.repository.name }}/com/ratio/exchange/${{ env.appname }}/${{ env.VERSION}}/${{ env.appname }}-${{ env.VERSION}}.zip    
+         env: 
+            VERSION: ${{ github.event.inputs.versionNumber }}
+        
+       - name: Unzip Package to temp folder 
+         shell: cmd
+         run: |
+           if exist ${{ env.appname }}-${{ env.VERSION}} rmdir ${{ env.appname }}-${{ env.VERSION}} /s /q
+           7z x ${{ env.appname }}-${{ env.VERSION}}.zip -o${{ env.appname }}-${{ env.VERSION}} -aoa
+         env: 
+           VERSION: ${{ github.event.inputs.versionNumber }}
+        
+       - name: Copy Extracted Files to Target Server Location 
+         run: |
+           robocopy "${{ env.appname }}-${{ env.VERSION}}" "\\E34-67-0fa\c\home\ratio.exchange\wwwroot\shared\" /e /XO /fp /ns /ndl /XD ".github"
+           if ($lastexitcode -lt 8) { exit 0 } else { exit 1 }
+         env: 
+           VERSION: ${{ github.event.inputs.versionNumber }}
